@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PEMA · rooms</title>
+  <link rel="stylesheet" href="css/app.css" />
+  <style>
+    .wrap { max-width: 1100px; margin: 24px auto; padding: 0 18px; display:grid; grid-template-columns: 1fr 1.3fr; gap: 20px; }
+    .rooms { display:flex; flex-direction:column; gap:8px; }
+    .roomrow { display:flex; justify-content:space-between; align-items:center; background:var(--card2); border-radius:10px; padding:10px 12px; cursor:pointer; border:1px solid transparent; }
+    .roomrow.active { border-color: var(--accent); }
+    .roomrow .hint { font-size:12px; }
+    #add { display:flex; gap:8px; margin-top:10px; }
+    #add input { flex:1; padding:10px 12px; border-radius:10px; border:1px solid #2a3442; background:var(--card2); color:var(--fg); }
+    .drop { border:2px dashed #2a3442; border-radius:14px; padding:26px; text-align:center; color:var(--muted); margin-top:10px; }
+    .drop.over { border-color: var(--accent); color: var(--fg); }
+    .steps { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+    .steps div { background:var(--card2); border-radius:10px; padding:10px 12px; font-size:14px; }
+    #prog { height:8px; background:#232b38; border-radius:4px; overflow:hidden; margin-top:12px; } #prog i { display:block; height:100%; width:0; background:var(--accent); transition: width .3s; }
+    nav a { color: var(--muted); margin-right: 14px; text-decoration:none; } nav a.here { color: var(--fg); }
+    @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">PEMA <span class="sub">rooms</span></div>
+    <nav><a href="app.html">Dashboard</a><a href="rooms.html" class="here">Rooms</a><a href="login.html">Sign out</a></nav>
+    <div class="pills"><span class="pill" id="who">–</span><span class="pill" id="conn-pill">connecting</span></div>
+  </header>
+  <div class="wrap">
+    <section class="card">
+      <h2>Your rooms <small>each room has its own scanned map</small></h2>
+      <div class="rooms" id="rooms"></div>
+      <form id="add"><input id="room-name" placeholder="Add a room, e.g. Kitchen" /><button class="primary" type="submit">Add</button></form>
+      <div class="hint" style="margin-top:10px">The active room is what the dashboard shows and what "where is the door" refers to.</div>
+    </section>
+    <section class="card">
+      <h2>Scan the active room <small id="active-name"></small></h2>
+      <div class="steps">
+        <div><b>Option A · live:</b> open the <a href="app.html" style="color:var(--blue)">dashboard</a>, press "Scan room", and slowly turn the laptop camera around once (30 s).</div>
+        <div><b>Option B · video:</b> record a slow 20 to 60 second pan of the room with your phone, then drop the file here. Frames are sampled once a second and sent to the board; nothing is uploaded anywhere else.</div>
+      </div>
+      <label class="drop" id="drop">Drop a room video here, or click to choose<input type="file" id="video" accept="video/*" hidden /></label>
+      <div id="prog"><i></i></div>
+      <div id="scan-info" class="hint" style="margin-top:8px"></div>
+      <video id="src" muted playsinline hidden></video><canvas id="cv" hidden></canvas>
+      <h2 style="margin-top:18px">What the scan does</h2>
+      <div class="steps">
+        <div>Objects: YOLOX on the Arduino's Qualcomm Dragonwing chip, every frame.</div>
+        <div>Fixtures (door, window, table, bed, sofa, fridge, stove, sink, tv): the vision model on the Hexagon NPU, every third frame.</div>
+        <div>Placement: a slow pan is treated as a sweep, so time gives direction, box size gives rough distance. Approximate 3D, not a metric reconstruction.</div>
+      </div>
+    </section>
+  </div>
+  <script src="libs/socket.io.min.js"></script>
+  <script src="libs/arduino.js"></script>
+  <script>
+    if (!localStorage.getItem('pema_user')) location.href = 'login.html';
+    document.getElementById('who').textContent = localStorage.getItem('pema_user') || '';
+    const ui = new WebUI(); const $ = (s) => document.querySelector(s);
+    ui.on_connect(() => { $('#conn-pill').textContent = 'board connected'; $('#conn-pill').className = 'pill ok'; });
+    let map = null;
+    ui.on_message('roommap', (m) => {
+      map = m; $('#active-name').textContent = m.room;
+      const box = $('#rooms'); box.innerHTML = '';
+      m.rooms.forEach((r) => {
+        const el = document.createElement('div'); el.className = 'roomrow' + (r.name === m.room ? ' active' : '');
+        el.innerHTML = `<span><b>${r.name}</b></span><span class="hint">${r.scanned_at ? r.fixtures + ' fixtures · scanned ' + new Date(r.scanned_at * 1000).toLocaleTimeString() : 'not scanned'}</span>`;
+        el.addEventListener('click', () => ui.send_message('room_select', { name: r.name }));
+        box.appendChild(el);
+      });
+    });
+    $('#add').addEventListener('submit', (e) => { e.preventDefault(); const n = $('#room-name').value.trim(); if (n) ui.send_message('room_add', { name: n }); $('#room-name').value = ''; });
+
+    // video scan
+    const drop = $('#drop'), src = $('#src'), cv = $('#cv'), bar = $('#prog i'), info = $('#scan-info');
+    let waiting = null;
+    ui.on_message('scan', (s) => {
+      if (s.state === 'frame') { bar.style.width = Math.round(s.progress * 100) + '%'; info.textContent = `frame ${s.frame} · ${Math.round(s.angle)}° · ${s.objects.join(', ') || 'no objects'}${s.fixtures.length ? ' · fixtures: ' + s.fixtures.join(', ') : ''}${s.vision ? ' · vision on NPU' : ''}`; if (waiting) waiting(); }
+      if (s.state === 'done') { bar.style.width = '100%'; info.textContent = `done · fixtures: ${Object.keys(s.fixtures || {}).join(', ') || 'none'} · open the dashboard to see the map`; }
+    });
+    function grab() { cv.width = 480; cv.height = Math.round(480 * src.videoHeight / src.videoWidth) || 360; cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height); return cv.toDataURL('image/jpeg', 0.6).split(',')[1]; }
+    async function scanFile(file) {
+      src.src = URL.createObjectURL(file); await new Promise((r) => { src.onloadedmetadata = r; });
+      const dur = Math.min(90, src.duration || 30), n = Math.max(8, Math.round(dur));
+      info.textContent = `scanning ${file.name} (${Math.round(dur)} s, ${n} frames)`;
+      ui.send_message('scan_start', { sweep_deg: 360, fixture_every: 3 });
+      for (let i = 0; i < n; i++) {
+        src.currentTime = (i / (n - 1)) * Math.max(0.1, dur - 0.1);
+        await new Promise((r) => { src.onseeked = r; });
+        ui.send_message('scan_frame', { image: grab(), progress: i / (n - 1) });
+        await new Promise((r) => { waiting = r; setTimeout(r, 25000); });
+      }
+      ui.send_message('scan_finish', {});
+    }
+    $('#video').addEventListener('change', (e) => { if (e.target.files[0]) scanFile(e.target.files[0]); });
+    ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', (e) => { const f = e.dataTransfer.files[0]; if (f) scanFile(f); });
+  </script>
+</body>
+</html>

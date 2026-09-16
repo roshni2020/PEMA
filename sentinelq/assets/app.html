@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PEMA</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">PEMA <span class="sub">Personal Environmental Memory Agent</span></div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="room">Room</button>
+      <button class="tab" data-tab="camera">Camera</button>
+      <button class="tab" data-tab="timeline">Timeline</button>
+      <button class="tab" data-tab="system">System</button>
+      <a class="tab" href="rooms.html" style="text-decoration:none">Rooms ↗</a>
+      <a class="tab" href="login.html" style="text-decoration:none" onclick="localStorage.removeItem('pema_user')">Sign out</a>
+    </nav>
+    <div class="pills">
+      <span class="pill" id="presence-pill">no one present</span>
+      <span class="pill" id="conn-pill">connecting</span>
+      <span class="pill" id="llm-pill">model: waiting</span>
+      <span class="pill" id="status-pill">idle</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- LEFT: the stage (tabs) -->
+    <section class="stage">
+      <div class="panel active" id="tab-room">
+        <div class="stage-head">
+          <h2><span id="room-name">Room</span> map <small>approximate 3D placement from a camera sweep · objects from YOLOX on the board · fixtures from the vision model on the NPU</small></h2>
+          <div class="row">
+            <button id="scan-btn" class="primary">Scan room (pan the camera)</button>
+            <label class="btn">Upload video<input type="file" id="scan-video" accept="video/*" hidden /></label>
+            <label class="hint">Camera faces <input type="range" id="view-angle" min="-180" max="180" value="0" /> <span id="view-angle-val">0°</span></label>
+          </div>
+        </div>
+        <div id="room3d" class="room3d"><canvas id="room-canvas"></canvas>
+          <div id="scan-overlay" class="overlay" hidden><div id="scan-text">scanning…</div><div class="bar"><i id="scan-bar"></i></div></div>
+          <div class="legend"><span class="lg obj">object</span><span class="lg fix">fixture</span><span class="lg you">camera / you</span><span class="lg trail">trail</span></div>
+        </div>
+        <div class="row hint" id="room-info">no scan yet · press Scan room and slowly turn the camera around once (about 30 s)</div>
+      </div>
+
+      <div class="panel" id="tab-camera">
+        <div class="stage-head">
+          <h2>Live camera <small>YOLOX on the board's Dragonwing</small></h2>
+          <div class="row"><span id="cam-info" class="hint">starting camera…</span><button id="cam-toggle" class="small">Camera off</button></div>
+        </div>
+        <div class="camera">
+          <video id="cam-video" autoplay playsinline muted></video>
+          <img id="cam-result" alt="" hidden />
+          <canvas id="cam-canvas" hidden></canvas>
+          <video id="scan-source" muted playsinline hidden></video>
+          <button id="cam-start" hidden>Enable camera</button>
+        </div>
+        <div id="detections" class="chips"><span class="hint">no objects yet</span></div>
+      </div>
+
+      <div class="panel" id="tab-timeline">
+        <div class="stage-head">
+          <h2>Timeline <small>local SQLite on the board · scrub to see where things were</small></h2>
+          <div class="row"><button id="tl-refresh" class="small">refresh</button><span id="tl-info" class="hint"></span></div>
+        </div>
+        <input type="range" id="tl-slider" min="0" max="100" value="100" />
+        <div id="tl-time" class="hint">now</div>
+        <div id="tl-events" class="events"></div>
+      </div>
+
+      <div class="panel" id="tab-system">
+        <div class="stage-head"><h2>System <small>where each part runs</small></h2></div>
+        <div class="split-grid">
+          <div class="box q"><b>Qualcomm silicon</b><div>Dragonwing QRB2210 on the Arduino: YOLOX perception, environmental memory, safety rules, whitelist, this dashboard.</div><div>Hexagon NPU (Snapdragon X Elite via GenieX): planner, vision model, fixture recognition.</div></div>
+          <div class="box a"><b>Arduino STM32U585</b><div>Real-time sensing every second, LED matrix, buzzer, relay, servo. Every action is read back and verified. Local over-temperature interlock.</div></div>
+        </div>
+        <h2>Inference <small>GenieX on the Hexagon NPU</small></h2>
+        <div class="grid" id="inference">
+          <div class="stat"><b id="inf-device">–</b><span>device</span></div>
+          <div class="stat"><b id="inf-tps">–</b><span>tokens / s</span></div>
+          <div class="stat"><b id="inf-ttft">–</b><span>first token (s)</span></div>
+          <div class="stat"><b id="inf-prompt">–</b><span>prompt tokens</span></div>
+          <div class="stat"><b id="inf-gen">–</b><span>generated</span></div>
+          <div class="stat"><b id="inf-steps">0</b><span>model calls</span></div>
+        </div>
+        <div class="hint" id="inf-model">model: –</div>
+        <div class="hint">Q4_0 weights · grammar-constrained decoding · llama.cpp HTP backend · benchmark: NPU prefill 297 tok/s vs CPU 24 tok/s (0.8B)</div>
+        <h2>Board <small>STM32, once a second</small></h2>
+        <div id="sensors" class="grid"><div class="hint">waiting for sensor data</div></div>
+        <h2>Hardware test <small>bypasses the agents, still verified</small></h2>
+        <div class="buttons">
+          <button data-action='{"type":"matrix","icon":"eye"}'>Eye</button>
+          <button data-action='{"type":"matrix","icon":"heart"}'>Heart</button>
+          <button data-action='{"type":"matrix","icon":"warning"}'>Warning</button>
+          <button data-action='{"type":"matrix","icon":"idle"}'>Clear</button>
+          <button data-action='{"type":"buzzer","pattern":"short"}'>Beep</button>
+          <button data-action='{"type":"relay","on":true}'>Light on</button>
+          <button data-action='{"type":"relay","on":false}'>Light off</button>
+        </div>
+        <h2>History <small>SQLite on the board</small></h2>
+        <div class="hint" id="history-info">–</div>
+        <div class="row" style="margin-top:8px"><button id="forget" class="small">Forget all remembered objects</button><span class="hint">clears test data before a demo; rooms and your enrollment stay</span></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: assistant + memory -->
+    <aside class="side">
+      <div class="card session">
+        <div class="card-head"><h2>You <small>enrolled locally, no face data</small></h2></div>
+        <div id="enroll-box">
+          <form id="enroll-form">
+            <input id="enroll-name" placeholder="Your name" autocomplete="off" />
+            <input id="enroll-phrase" placeholder="Private passphrase" autocomplete="off" />
+            <button type="submit" class="small">Enroll</button>
+          </form>
+        </div>
+        <div id="owner-box" hidden><b id="owner-name">–</b> <span id="owner-verified" class="hint">say your passphrase to verify</span></div>
+        <div id="changes" class="changes"></div>
+      </div>
+
+      <div class="card talk">
+        <div class="log" id="log"><div class="hint">"Where is my phone?" · "Where is the door?" · "What is in front of me?" · "Turn the light on" · "What changed while I was away?"</div></div>
+        <form id="cmd-form">
+          <button type="button" id="mic" title="Talk">&#127908;</button>
+          <input id="cmd" placeholder="Ask PEMA…" autocomplete="off" />
+          <button type="submit" id="send">Send</button>
+        </form>
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" id="speak" checked /> voice</label>
+          <label class="toggle"><input type="checkbox" id="autonomous" /> watch mode</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Agent trace</h2><button id="clear-trace" class="small">clear</button></div>
+        <div id="trace" class="trace"><div class="hint">steps appear here</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Memory <small>last seen · usual spot</small></h2>
+        <div id="memory" class="memory"><div class="hint">nothing remembered yet</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Verified actions</h2>
+        <div id="actions" class="actions"><span class="hint">no actions yet</span></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="libs/socket.io.min.js"></script>
+  <script src="libs/arduino.js"></script>
+  <script src="libs/three.min.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/room3d.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/timeline.js"></script>
+</body>
+</html>

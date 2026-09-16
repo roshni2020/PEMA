@@ -1,0 +1,12 @@
+name: SentinelQ
+icon: 🔒
+description: Offline agentic guardian. YOLOX vision + GenieX local LLM decide, the STM32 acts.
+
+bricks:
+  - arduino:web_ui
+  # YOLOX on still frames sent from the dashboard's camera (laptop/phone webcam). No USB camera needed.
+  - arduino:object_detection
+  # With a USB webcam on the board you can use the live-stream brick instead:
+  # - arduino:video_object_detection
+  # Optional wake word ("Hey Arduino") - needs a USB microphone:
+  # - arduino:keyword_spotting

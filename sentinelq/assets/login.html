@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PEMA · sign in</title>
+  <link rel="stylesheet" href="css/app.css" />
+  <style>
+    .wrap { max-width: 980px; margin: 6vh auto; padding: 0 18px; display:grid; grid-template-columns: 1.1fr 1fr; gap:24px; }
+    .hero h1 { font-size: 34px; margin: 0 0 8px; }
+    .hero p { color: var(--muted); font-size: 16px; line-height: 1.6; }
+    .loop { display:flex; flex-direction:column; gap:8px; margin-top:16px; }
+    .loop div { background: var(--card2); border-radius: 10px; padding: 10px 12px; font-size: 14px; display:flex; gap:10px; align-items:center; }
+    .loop b { display:inline-block; width:26px; height:26px; border-radius:50%; background:#2d6cdf; text-align:center; line-height:26px; font-size:13px; flex:none; }
+    .card form { display:flex; flex-direction:column; gap:10px; }
+    .card input { padding: 12px 14px; border-radius: 10px; border: 1px solid #2a3442; background: var(--card2); color: var(--fg); font-size: 16px; }
+    .privacy { margin-top:14px; font-size:13px; color:var(--muted); line-height:1.5; }
+    .privacy li { margin: 4px 0; }
+    #status { min-height: 20px; }
+    @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header><div class="brand">PEMA <span class="sub">Personal Environmental Memory Agent</span></div></header>
+  <div class="wrap">
+    <section class="hero">
+      <h1>A private memory of your room, for people who can't see it well.</h1>
+      <p>PEMA is built for low-vision and memory-impaired users. It runs on an Arduino with Qualcomm silicon on your desk, remembers where your things are, notices what moved while you were away, and can act on real devices, verifying every action. Nothing leaves your home.</p>
+      <div class="loop">
+        <div><b>1</b> You enroll once: a name and a private passphrase. No face data.</div>
+        <div><b>2</b> You scan each room once, by turning the camera around or uploading a short video.</div>
+        <div><b>3</b> PEMA remembers where objects are and notices when they move.</div>
+        <div><b>4</b> Ask "where are my keys" or "where is the door". It answers out loud.</div>
+        <div><b>5</b> It can turn the light on, and proves it did.</div>
+      </div>
+      <div class="privacy">
+        <b>Privacy, plainly</b>
+        <ul>
+          <li>Camera frames are analysed on the device and discarded. Only object names and positions are stored, on the board, never in a cloud.</li>
+          <li>It recognises objects, not faces. It verifies you by passphrase, never by biometrics. It cannot identify anyone else.</li>
+          <li>The camera has an off switch in the app, and the board's LED shows when it is watching.</li>
+          <li>The reasoning model runs on a local Qualcomm NPU. No internet is needed after setup.</li>
+        </ul>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Sign in <small>or register on this board</small></h2>
+      <form id="login">
+        <input id="name" placeholder="Your name" autocomplete="off" required />
+        <input id="phrase" placeholder="Private passphrase" type="password" autocomplete="off" required />
+        <button class="primary" type="submit">Continue</button>
+        <div id="status" class="hint"></div>
+      </form>
+      <div class="privacy">Registering stores the name and passphrase in a file on the Arduino. Signing in with the same passphrase later verifies you for the session.</div>
+    </section>
+  </div>
+  <script src="libs/socket.io.min.js"></script>
+  <script src="libs/arduino.js"></script>
+  <script>
+    const ui = new WebUI(); const st = document.getElementById('status');
+    let known = null;
+    ui.on_message('presence', (p) => { known = p.owner; st.textContent = p.owner ? `This board is registered to ${p.owner.name}. Enter the passphrase to continue.` : 'No user registered yet. Choose a name and passphrase.'; });
+    ui.on_message('login_result', (r) => {
+      if (r.ok) { localStorage.setItem('pema_user', r.name); location.href = 'app.html'; }
+      else st.textContent = r.error || 'wrong passphrase';
+    });
+    document.getElementById('login').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('name').value.trim(), phrase = document.getElementById('phrase').value.trim();
+      st.textContent = 'checking on the board…';
+      ui.send_message('login', { name, phrase });
+    });
+  </script>
+</body>
+</html>

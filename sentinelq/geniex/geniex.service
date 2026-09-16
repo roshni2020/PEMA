@@ -1,0 +1,18 @@
+# systemd unit so GenieX comes up on boot with the board.
+# sudo cp geniex.service /etc/systemd/system/ && sudo systemctl enable --now geniex
+[Unit]
+Description=Qualcomm GenieX OpenAI-compatible server (CPU, llama.cpp)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=arduino
+Environment=GENIEX_MODEL=unsloth/Qwen3.5-0.8B-GGUF:Q4_0
+ExecStart=/home/arduino/sentinelq/geniex/run-geniex.sh
+ExecStop=/usr/bin/docker stop geniex
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
